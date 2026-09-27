@@ -1,0 +1,17 @@
+[workspace]
+resolver = "2"
+members = [
+    "src-tauri",
+    "crates/player-core", 
+    "crates/library-core",
+]
+
+[workspace.package]
+license = "GPL-3.0-only"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true

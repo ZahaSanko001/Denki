@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Denki</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="term">
+    <header class="term__bar" data-tauri-drag-region>
+      <span class="term__hiragana">でんき</span>
+      <span class="term__name">denki</span>
+      <span id="status-live" class="term__dot" aria-hidden="true">●</span>
+      <span id="status-clock" class="term__clock">00:00</span>
+      <button id="close-btn" class="term__close" aria-label="Close">×</button>
+    </header>
+
+    <section class="now">
+      <div class="now__label">now playing</div>
+      <div class="now__title"><span id="now-playing">no signal</span><span class="cursor">_</span></div>
+
+      <div class="now__row">
+        <span id="time-display" class="now__time">0:00 / 0:00</span>
+        <input id="seek-bar" type="range" min="0" max="100" value="0" disabled class="now__seek" />
+      </div>
+
+      <canvas id="oscilloscope" class="now__bars"></canvas>
+
+      <div class="now__controls">
+        <button id="prev-btn" class="ctl"><span>prev</span></button>
+        <button id="play-pause-btn" class="ctl ctl--main"><span>play</span></button>
+        <button id="next-btn" class="ctl"><span>next</span></button>
+        <div class="vol">
+          <span class="vol__label">vol</span>
+          <input id="volume" type="range" min="0" max="1" step="0.01" value="1" />
+        </div>
+      </div>
+    </section>
+
+    <section class="lib">
+      <div class="lib__header">
+        <div class="lib__label">library</div>
+        <div class="lib__actions">
+          <button id="open-file-btn" class="lib__action">open file</button>
+          <button id="open-folder-btn" class="lib__action">open folder</button>
+        </div>
+      </div>
+      <ul id="track-list" class="lib__list"></ul>
+    </section>
+
+  </div>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>
