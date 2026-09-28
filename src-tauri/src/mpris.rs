@@ -27,6 +27,7 @@ pub fn init(handle: PlayerHandle, hwnd: Option<*mut std::ffi::c_void>) -> Result
     // Wire incoming MPRIS/media-key events back into the player.
     {
         let event_handle = handle.clone();
+        #[cfg(target_os = "linux")]
         let shared_for_volume = shared.clone();
         let shared_for_stop = shared.clone();
         let stopped_for_events = stopped_by_command.clone();
@@ -73,6 +74,7 @@ pub fn init(handle: PlayerHandle, hwnd: Option<*mut std::ffi::c_void>) -> Result
                 MediaControlEvent::SetVolume(vol) => {
                     event_handle.set_volume(vol as f32);
                     // Souvlaki requires this acknowledgement call on the MPRIS backend.
+                    #[cfg(target_os = "linux")]
                     if let Ok(mut controls) = shared_for_volume.lock() {
                         let _ = controls.set_volume(vol);
                     }
