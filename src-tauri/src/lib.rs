@@ -93,6 +93,7 @@ pub fn run() {
                     width: 480.0,
                     height: 370.0,
                 }));
+                let _ = window.center();
                 let _ = window.show();
             }
 
