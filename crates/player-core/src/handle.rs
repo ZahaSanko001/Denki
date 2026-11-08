@@ -61,8 +61,8 @@ impl PlayerHandle {
                 match rx.recv_timeout(Duration::from_millis(250)) {
                     Ok(cmd) => handle_command(cmd, &mut player, &mut queue, &mut queue_index),
                     Err(RecvTimeoutError::Timeout) => {
-                        if !queue.is_empty() && player.finished() && queue_index + 1 < queue.len() {
-                            queue_index += 1;
+                        if !queue.is_empty() && player.finished() {
+                            queue_index = (queue_index + 1) % queue.len();
                             if player.load(&queue[queue_index]).is_ok() {
                                 player.play();
                             }
@@ -169,8 +169,8 @@ fn handle_command(cmd: Command, player: &mut Player, queue: &mut Vec<PathBuf>, q
             let _ = reply.send(result);
         }
         Command::Next(reply) => {
-            if *queue_index + 1 < queue.len() {
-                *queue_index += 1;
+            if !queue.is_empty() {
+                *queue_index = (*queue_index + 1) % queue.len();
                 let result = player.load(&queue[*queue_index]);
                 if result.is_ok() { player.play(); }
                 let _ = reply.send(result);
@@ -179,8 +179,8 @@ fn handle_command(cmd: Command, player: &mut Player, queue: &mut Vec<PathBuf>, q
             }
         }
         Command::Prev(reply) => {
-            if *queue_index > 0 {
-                *queue_index -= 1;
+            if !queue.is_empty() {
+                *queue_index = (*queue_index + queue.len() - 1) % queue.len();
                 let result = player.load(&queue[*queue_index]);
                 if result.is_ok() { player.play(); }
                 let _ = reply.send(result);

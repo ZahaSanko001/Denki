@@ -1,5 +1,4 @@
 use std::fs::File;
-use std::io::BufReader;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
@@ -7,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
-use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
+use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink, Source};
 mod handle;
 pub use handle::{PlayerHandle, Status};
 
@@ -15,8 +14,6 @@ pub use handle::{PlayerHandle, Status};
 pub enum PlayerError {
     #[error("failed to open audio output device: {0}")]
     Device(#[from] rodio::StreamError),
-    #[error("failed to create playback sink: {0}")]
-    Sink(#[from] rodio::PlayError),
     #[error("failed to read file: {0}")]
     Io(#[from] std::io::Error),
     #[error("failed to decode audio: {0}")]
@@ -219,8 +216,8 @@ impl<S> Source for SpectrumSource<S>
 where
     S: Source<Item = f32>,
 {
-    fn current_frame_len(&self) -> Option<usize> {
-        self.inner.current_frame_len()
+    fn current_span_len(&self) -> Option<usize> {
+        self.inner.current_span_len()
     }
 
     fn channels(&self) -> u16 {
@@ -242,7 +239,6 @@ where
 
 pub struct Player {
     _stream: OutputStream, // must stay alive for the whole player's lifetime
-    stream_handle: OutputStreamHandle,
     sink: Option<Sink>,
     total_duration: Option<Duration>,
     position_base: Duration,        // committed position as of the last play/pause/seek
@@ -255,10 +251,9 @@ pub struct Player {
 
 impl Player {
     pub fn new() -> Result<Self, PlayerError> {
-        let (stream, stream_handle) = OutputStream::try_default()?;
-        Ok(Self { 
-            _stream: stream, 
-            stream_handle, 
+        let stream = OutputStreamBuilder::open_default_stream()?;
+        Ok(Self {
+            _stream: stream,
             sink: None,
             total_duration: None,
             position_base: Duration::ZERO,
@@ -272,13 +267,13 @@ impl Player {
 
     pub fn load(&mut self, path: &Path) -> Result<(), PlayerError> {
         let file = File::open(path)?;
-        let source = Decoder::new(BufReader::new(file))?;
+        let source = Decoder::try_from(file)?;
         self.total_duration = source.total_duration();
         self.sample_rate = source.sample_rate();
         self.spectrum_buffer.clear();
-        let source = SpectrumSource::new(source.convert_samples::<f32>(), self.spectrum_buffer.clone());
+        let source = SpectrumSource::new(source, self.spectrum_buffer.clone());
 
-        let sink = Sink::try_new(&self.stream_handle)?;
+        let sink = Sink::connect_new(self._stream.mixer());
         sink.append(source);
         sink.set_volume(self.volume);
         sink.pause(); // load() shouldn't auto-play; caller decides

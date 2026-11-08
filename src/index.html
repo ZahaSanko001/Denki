@@ -41,9 +41,16 @@
       <div class="lib__header">
         <div class="lib__label">library</div>
         <div class="lib__actions">
+          <input id="download-url" class="lib__url" type="url" placeholder="paste media URL" aria-label="Media URL to download" />
+          <button id="download-btn" class="lib__action">download audio</button>
           <button id="open-file-btn" class="lib__action">open file</button>
           <button id="open-folder-btn" class="lib__action">open folder</button>
         </div>
+      </div>
+      <div id="library-activity" class="lib__activity" role="status" aria-live="polite" hidden>
+        <span class="lib__activity-dot" aria-hidden="true">●</span>
+        <span id="library-activity-text" class="lib__activity-text"></span>
+        <span class="lib__activity-track" aria-hidden="true"><span></span></span>
       </div>
       <ul id="track-list" class="lib__list"></ul>
     </section>

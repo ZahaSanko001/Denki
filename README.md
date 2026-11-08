@@ -13,6 +13,7 @@ Denki is a compact desktop music player for listening to local audio files. It p
 ## Features
 
 - Play audio files or scan a folder and its subfolders.
+- Download audio from supported HTTP(S) media URLs; Denki installs yt-dlp on first use.
 - Browse tracks and control playback, seeking, and volume.
 - View a stereo spectrum visualizer inspired by CAVA.
 - Restore the last library, track, playback position, and volume when you reopen the app.
@@ -56,6 +57,8 @@ chmod +x ./Denki_*.AppImage
 ## Use Denki
 
 Select **open file** to add a single audio file, or **open folder** to scan a music folder and its subfolders. Select a track in the library to play it.
+
+To download audio, paste a media URL into the field above the library and select **download audio**. On the first download, Denki fetches the official yt-dlp executable for your platform and stores it in Denki's application data folder. This requires an internet connection. Audio is saved in the source's original supported audio format in the `Denki Downloads` folder inside your music folder (or home folder if no music folder is configured); Denki does not convert it to MP3, so FFmpeg is not required. Some sources only provide audio formats Denki cannot play without conversion. Supported sites and URLs depend on yt-dlp; some sources may be unavailable, and DRM-protected content is not supported. Follow the source site's terms and applicable laws when downloading.
 
 | Key | Action |
 | --- | --- |

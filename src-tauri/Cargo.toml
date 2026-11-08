@@ -1,6 +1,6 @@
 [package]
 name = "denki"
-version = "0.1.0"
+version = "0.1.1"
 description = "A compact desktop music player built with Tauri and Rust"
 edition = "2021"
 license.workspace = true
@@ -24,6 +24,9 @@ dirs = "5"
 toml = "0.8"
 souvlaki = "0.8"
 serde = { version = "1", features = ["derive"] }
+url = "2"
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 player-core = { path = "../crates/player-core" }
 library-core = { path = "../crates/library-core" }
 

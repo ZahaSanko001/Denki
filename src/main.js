@@ -9,6 +9,12 @@ const timeDisplay = document.getElementById("time-display");
 const volumeSlider = document.getElementById("volume");
 const nowPlayingEl = document.getElementById("now-playing");
 const trackListEl = document.getElementById("track-list");
+const libraryActivityEl = document.getElementById("library-activity");
+const libraryActivityTextEl = document.getElementById("library-activity-text");
+const downloadUrlEl = document.getElementById("download-url");
+const downloadBtn = document.getElementById("download-btn");
+const openFileBtn = document.getElementById("open-file-btn");
+const openFolderBtn = document.getElementById("open-folder-btn");
 const liveIndicator = document.getElementById("status-live");
 const hiraganaEl = document.querySelector(".term__hiragana");
 const clockEl = document.getElementById("status-clock");
@@ -31,6 +37,7 @@ let barsFramePending = false;
 let lastStatusPollAt = 0;
 let lastMprisTitle = null;
 let mprisUnavailable = false;
+let libraryBusy = false;
 
 // ── protocol drone (real Web Audio synth + analyser) ──
 let audioCtx = null;
@@ -206,7 +213,29 @@ function formatTime(seconds) {
 }
 
 // ── library ──
-async function openPath(path) {
+function setLibraryActivity(message = null, activeAction = null) {
+  libraryBusy = Boolean(message);
+  libraryActivityEl.hidden = !libraryBusy;
+  libraryActivityTextEl.textContent = message ?? "";
+  downloadBtn.textContent = activeAction === "download" ? "downloading..." : "download audio";
+  openFileBtn.textContent = activeAction === "file" ? "loading..." : "open file";
+  openFolderBtn.textContent = activeAction === "folder" ? "loading..." : "open folder";
+  [downloadUrlEl, downloadBtn, openFileBtn, openFolderBtn].forEach((control) => {
+    control.disabled = libraryBusy;
+  });
+}
+
+function paintActivity(message, activeAction = null) {
+  setLibraryActivity(message, activeAction);
+  return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+}
+
+function displayName(path) {
+  return path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
+}
+
+async function openPath(path, source = null) {
+  await paintActivity(`Loading ${displayName(path)}…`, source);
   try {
     libraryTracks = await invoke("library_scan_paths", { paths: [path] });
     renderTrackList();
@@ -215,6 +244,8 @@ async function openPath(path) {
     saveState();
   } catch (err) {
     nowPlayingEl.textContent = `error: ${err}`;
+  } finally {
+    setLibraryActivity();
   }
 }
 
@@ -228,7 +259,9 @@ function renderTrackList() {
     indexEl.className = "lib__index";
     indexEl.textContent = num;
     li.append(indexEl, document.createTextNode(`${track.title} — ${track.artist}`));
-    li.addEventListener("click", () => playFromIndex(index));
+    li.addEventListener("click", () => {
+      playFromIndex(index).catch((err) => console.error("track playback failed:", err));
+    });
     trackListEl.appendChild(li);
   });
 }
@@ -236,9 +269,14 @@ function renderTrackList() {
 async function playFromIndex(index, autoplay = true) {
   if (droneActive) stopDrone();
   const paths = libraryTracks.map((t) => t.path);
-  await invoke("queue_load", { paths, startIndex: index, autoplay });
-  trackLoaded = true;
-  seekBar.disabled = false;
+  try {
+    await invoke("queue_load", { paths, startIndex: index, autoplay });
+    trackLoaded = true;
+    seekBar.disabled = false;
+  } catch (err) {
+    nowPlayingEl.textContent = `playback error: ${err}`;
+    throw err;
+  }
 }
 
 function saveState() {
@@ -254,21 +292,54 @@ setInterval(saveState, 5000);
 listen("tauri://drag-drop", async (event) => {
   const paths = event.payload.paths;
   if (!paths || paths.length === 0) return;
-  libraryTracks = await invoke("library_scan_paths", { paths });
-  renderTrackList();
-  if (paths.length === 1) lastOpenedPath = paths[0];
-  if (libraryTracks.length > 0) await playFromIndex(0);
-  saveState();
+  setLibraryActivity(paths.length === 1
+    ? `Loading ${displayName(paths[0])}…`
+    : `Loading ${paths.length} items…`);
+  try {
+    libraryTracks = await invoke("library_scan_paths", { paths });
+    renderTrackList();
+    if (paths.length === 1) lastOpenedPath = paths[0];
+    if (libraryTracks.length > 0) await playFromIndex(0);
+    saveState();
+  } catch (err) {
+    nowPlayingEl.textContent = `error: ${err}`;
+  } finally {
+    setLibraryActivity();
+  }
 });
 
-document.getElementById("open-file-btn").addEventListener("click", async () => {
+openFileBtn.addEventListener("click", async () => {
   const selected = await open({ multiple: false, directory: false });
-  if (selected) await openPath(selected);
+  if (selected) await openPath(selected, "file");
 });
 
-document.getElementById("open-folder-btn").addEventListener("click", async () => {
+openFolderBtn.addEventListener("click", async () => {
   const selected = await open({ multiple: false, directory: true });
-  if (selected) await openPath(selected);
+  if (selected) await openPath(selected, "folder");
+});
+
+async function downloadAudio() {
+  const url = downloadUrlEl.value.trim();
+  if (!url || libraryBusy) return;
+  await paintActivity("Downloading audio…", "download");
+  try {
+    const path = await invoke("download_audio", { url });
+    const added = await invoke("library_scan_paths", { paths: [path] });
+    if (added.length) {
+      libraryTracks = [...libraryTracks, ...added];
+      renderTrackList();
+    }
+    downloadUrlEl.value = "";
+    nowPlayingEl.textContent = "audio downloaded";
+  } catch (err) {
+    nowPlayingEl.textContent = `download error: ${err}`;
+  } finally {
+    setLibraryActivity();
+  }
+}
+downloadBtn.addEventListener("click", downloadAudio);
+downloadUrlEl.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") void downloadAudio();
 });
 
 // ── transport ──
@@ -412,26 +483,31 @@ updateClock();
 resizeCanvas();
 scheduleBars();
 (async () => {
-  const saved = await invoke("state_load");
+  setLibraryActivity("Restoring library…");
+  try {
+    const saved = await invoke("state_load");
 
-  if (saved.volume != null) {
-    volumeSlider.value = String(saved.volume);
-    await invoke("player_set_volume", { volume: saved.volume });
-  }
-
-  if (saved.last_path) {
-    lastOpenedPath = saved.last_path;
-    try {
-      libraryTracks = await invoke("library_scan_paths", { paths: [saved.last_path] });
-      renderTrackList();
-      if (libraryTracks.length > 0) {
-        await playFromIndex(saved.last_index ?? 0, false);
-        if (saved.last_position_secs) {
-          await invoke("player_seek", { seconds: saved.last_position_secs });
-        }
-      }
-    } catch (err) {
-      console.error("failed to restore last session:", err);
+    if (saved.volume != null) {
+      volumeSlider.value = String(saved.volume);
+      await invoke("player_set_volume", { volume: saved.volume });
     }
+
+    if (saved.last_path) {
+      lastOpenedPath = saved.last_path;
+      try {
+        libraryTracks = await invoke("library_scan_paths", { paths: [saved.last_path] });
+        renderTrackList();
+        if (libraryTracks.length > 0) {
+          await playFromIndex(saved.last_index ?? 0, false);
+          if (saved.last_position_secs) {
+            await invoke("player_seek", { seconds: saved.last_position_secs });
+          }
+        }
+      } catch (err) {
+        console.error("failed to restore last session:", err);
+      }
+    }
+  } finally {
+    setLibraryActivity();
   }
 })();
