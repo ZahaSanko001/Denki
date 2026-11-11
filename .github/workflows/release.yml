@@ -4,9 +4,16 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release tag to upload the Android APK to (for example, v0.1.2)
+        required: true
+        type: string
 
 jobs:
   publish-tauri:
+    if: github.event_name == 'push'
     permissions:
       contents: write
     strategy:
@@ -67,6 +74,10 @@ jobs:
 
   publish-android:
     needs: publish-tauri
+    if: >-
+      always() &&
+      ((github.event_name == 'push' && needs.publish-tauri.result == 'success') ||
+      github.event_name == 'workflow_dispatch')
     permissions:
       contents: write
     runs-on: ubuntu-22.04
@@ -79,6 +90,8 @@ jobs:
           java-version: '21'
 
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       - name: Install Android NDK
         run: sdkmanager "ndk;30.0.16248370"
@@ -98,6 +111,13 @@ jobs:
           test -n "$ANDROID_KEYSTORE_BASE64" || { echo "Missing ANDROID_KEYSTORE_BASE64 release secret"; exit 1; }
           echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/denki-release.jks"
 
+      - name: Verify Android release tag matches app version
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+        run: |
+          version=$(python3 -c 'import json; print(json.load(open("src-tauri/tauri.conf.json"))["version"])')
+          test "$RELEASE_TAG" = "v$version" || { echo "Release tag $RELEASE_TAG does not match app version v$version"; exit 1; }
+
       - name: Build signed Android APK
         env:
           ANDROID_SDK_ROOT: ${{ env.ANDROID_HOME }}
@@ -112,6 +132,6 @@ jobs:
       - name: Upload Android APK to draft release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
           draft: true
           files: src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk
