@@ -118,6 +118,32 @@ jobs:
           version=$(python3 -c 'import json; print(json.load(open("src-tauri/tauri.conf.json"))["version"])')
           test "$RELEASE_TAG" = "v$version" || { echo "Release tag $RELEASE_TAG does not match app version v$version"; exit 1; }
 
+      - name: Validate Android signing key and passwords
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/denki-release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          keytool -list -v \
+            -keystore "$ANDROID_KEYSTORE_PATH" \
+            -storepass "$ANDROID_KEYSTORE_PASSWORD" \
+            -alias "$ANDROID_KEY_ALIAS" | grep -q 'Entry type: PrivateKeyEntry' || {
+              echo "The keystore password or alias is incorrect, or the alias is not a private key entry."
+              exit 1
+            }
+          keytool -importkeystore \
+            -srckeystore "$ANDROID_KEYSTORE_PATH" \
+            -srcstorepass "$ANDROID_KEYSTORE_PASSWORD" \
+            -srcalias "$ANDROID_KEY_ALIAS" \
+            -srckeypass "$ANDROID_KEY_PASSWORD" \
+            -destkeystore "$RUNNER_TEMP/denki-key-validation.p12" \
+            -deststoretype PKCS12 \
+            -deststorepass "$ANDROID_KEY_PASSWORD" \
+            -noprompt
+          rm -f "$RUNNER_TEMP/denki-key-validation.p12"
+
       - name: Build signed Android APK
         env:
           ANDROID_SDK_ROOT: ${{ env.ANDROID_HOME }}
