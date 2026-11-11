@@ -703,11 +703,10 @@ dependencies = [
 
 [[package]]
 name = "denki"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
+ "denki-core",
  "dirs 5.0.1",
- "library-core",
- "player-core",
  "raw-window-handle",
  "reqwest",
  "rustls",
@@ -715,9 +714,20 @@ dependencies = [
  "souvlaki",
  "tauri",
  "tauri-build",
+ "tauri-plugin-android-fs",
  "tauri-plugin-dialog",
- "toml 0.8.2",
+ "tauri-plugin-fs",
  "url",
+]
+
+[[package]]
+name = "denki-core"
+version = "0.1.0"
+dependencies = [
+ "library-core",
+ "player-core",
+ "serde",
+ "toml 0.8.2",
 ]
 
 [[package]]
@@ -3784,6 +3794,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sync_async"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b815ef8e053247ad785b136d233ee9c9872eeda5319f2719d57cac88270c3dd9"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "sync_wrapper"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4000,6 +4021,25 @@ dependencies = [
  "serde_json",
  "tauri-utils",
  "walkdir",
+]
+
+[[package]]
+name = "tauri-plugin-android-fs"
+version = "29.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8ca3a802951458c58c32e4605d43143ca92c205ba3eb7c989b03183cd88e9e6e"
+dependencies = [
+ "base64 0.22.1",
+ "glob",
+ "percent-encoding",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "sync_async",
+ "tauri",
+ "tauri-plugin",
+ "tauri-plugin-fs",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

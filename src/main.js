@@ -1,9 +1,10 @@
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 const { open } = window.__TAURI__.dialog;
+const isAndroid = /Android/i.test(navigator.userAgent);
+document.documentElement.classList.toggle("platform-android", isAndroid);
 
 const playPauseBtn = document.getElementById("play-pause-btn");
-const playPauseLabel = playPauseBtn.querySelector("span");
 const seekBar = document.getElementById("seek-bar");
 const timeDisplay = document.getElementById("time-display");
 const volumeSlider = document.getElementById("volume");
@@ -23,6 +24,7 @@ const scopeCtx = canvas.getContext("2d");
 
 
 let lastOpenedPath = null;
+let lastOpenedPaths = [];
 let lastKnownStatus = null;
 let libraryTracks = [];
 let isDraggingSeek = false;
@@ -38,6 +40,7 @@ let lastStatusPollAt = 0;
 let lastMprisTitle = null;
 let mprisUnavailable = false;
 let libraryBusy = false;
+let lastVisibleQueueIndex = null;
 
 // ── protocol drone (real Web Audio synth + analyser) ──
 let audioCtx = null;
@@ -93,8 +96,11 @@ function setLiveIndicator(live) {
   hiraganaEl.classList.toggle("is-live", live);
 }
 
-function setPlayPauseLabel(label) {
-  playPauseLabel.textContent = label;
+function setPlaybackButtonPlaying(playing) {
+  playPauseBtn.classList.toggle("is-playing", playing);
+  playPauseBtn.setAttribute("aria-label", playing ? "Pause" : "Play");
+  playPauseBtn.setAttribute("aria-pressed", String(playing));
+  playPauseBtn.title = playing ? "Pause" : "Play";
 }
 
 // ── CAVA-style stereo spectrum ──
@@ -217,9 +223,12 @@ function setLibraryActivity(message = null, activeAction = null) {
   libraryBusy = Boolean(message);
   libraryActivityEl.hidden = !libraryBusy;
   libraryActivityTextEl.textContent = message ?? "";
-  downloadBtn.textContent = activeAction === "download" ? "downloading..." : "download audio";
-  openFileBtn.textContent = activeAction === "file" ? "loading..." : "open file";
-  openFolderBtn.textContent = activeAction === "folder" ? "loading..." : "open folder";
+  [downloadBtn, openFileBtn, openFolderBtn].forEach((button) => {
+    const busy = activeAction === button.dataset.action;
+    button.classList.toggle("is-loading", busy);
+    button.setAttribute("aria-label", busy ? "Working…" : button.dataset.idleLabel);
+    button.title = busy ? "Working…" : button.dataset.idleLabel;
+  });
   [downloadUrlEl, downloadBtn, openFileBtn, openFolderBtn].forEach((control) => {
     control.disabled = libraryBusy;
   });
@@ -235,11 +244,18 @@ function displayName(path) {
 }
 
 async function openPath(path, source = null) {
-  await paintActivity(`Loading ${displayName(path)}…`, source);
+  const paths = Array.isArray(path) ? path : [path];
+  const label = paths.length === 1 && !paths[0].startsWith("content:")
+    ? displayName(paths[0])
+    : `${paths.length} selected track${paths.length === 1 ? "" : "s"}`;
+  await paintActivity(`Loading ${label}…`, source);
   try {
-    libraryTracks = await invoke("library_scan_paths", { paths: [path] });
+    libraryTracks = await invoke("library_scan_paths", { paths });
     renderTrackList();
-    lastOpenedPath = path;
+    // Android picker grants may be temporary, so don't persist content URIs
+    // as the desktop path-based restore point.
+    lastOpenedPath = paths.length === 1 && !paths[0].startsWith("content:") ? paths[0] : null;
+    lastOpenedPaths = paths;
     if (libraryTracks.length > 0) await playFromIndex(0);
     saveState();
   } catch (err) {
@@ -282,6 +298,7 @@ async function playFromIndex(index, autoplay = true) {
 function saveState() {
   invoke("state_save", {
     lastPath: lastOpenedPath,
+    lastPaths: lastOpenedPaths,
     lastIndex: lastKnownStatus?.queue_index ?? null,
     lastPositionSecs: lastKnownStatus?.position_secs ?? null,
     volume: lastKnownStatus?.volume ?? Number(volumeSlider.value),
@@ -299,6 +316,7 @@ listen("tauri://drag-drop", async (event) => {
     libraryTracks = await invoke("library_scan_paths", { paths });
     renderTrackList();
     if (paths.length === 1) lastOpenedPath = paths[0];
+    lastOpenedPaths = libraryTracks.map((track) => track.path);
     if (libraryTracks.length > 0) await playFromIndex(0);
     saveState();
   } catch (err) {
@@ -309,11 +327,47 @@ listen("tauri://drag-drop", async (event) => {
 });
 
 openFileBtn.addEventListener("click", async () => {
+  if (isAndroid) {
+    await paintActivity("Choosing audio files…", "file");
+    try {
+      const tracks = await invoke("android_pick_files");
+      if (!tracks.length) return;
+      libraryTracks = tracks;
+      renderTrackList();
+      lastOpenedPath = null;
+      lastOpenedPaths = tracks.map((track) => track.path);
+      await playFromIndex(0);
+      saveState();
+    } catch (err) {
+      nowPlayingEl.textContent = `library error: ${err}`;
+    } finally {
+      setLibraryActivity();
+    }
+    return;
+  }
   const selected = await open({ multiple: false, directory: false });
   if (selected) await openPath(selected, "file");
 });
 
 openFolderBtn.addEventListener("click", async () => {
+  if (isAndroid) {
+    await paintActivity("Choosing and scanning folder…", "folder");
+    try {
+      const tracks = await invoke("android_pick_folder");
+      if (!tracks.length) return;
+      libraryTracks = tracks;
+      renderTrackList();
+      lastOpenedPath = null;
+      lastOpenedPaths = tracks.map((track) => track.path);
+      await playFromIndex(0);
+      saveState();
+    } catch (err) {
+      nowPlayingEl.textContent = `library error: ${err}`;
+    } finally {
+      setLibraryActivity();
+    }
+    return;
+  }
   const selected = await open({ multiple: false, directory: true });
   if (selected) await openPath(selected, "folder");
 });
@@ -321,7 +375,7 @@ openFolderBtn.addEventListener("click", async () => {
 async function downloadAudio() {
   const url = downloadUrlEl.value.trim();
   if (!url || libraryBusy) return;
-  await paintActivity("Downloading audio…", "download");
+  await paintActivity(isAndroid ? "Checking yt-dlp and downloading audio…" : "Downloading audio…", "download");
   try {
     const path = await invoke("download_audio", { url });
     const added = await invoke("library_scan_paths", { paths: [path] });
@@ -332,7 +386,11 @@ async function downloadAudio() {
     downloadUrlEl.value = "";
     nowPlayingEl.textContent = "audio downloaded";
   } catch (err) {
-    nowPlayingEl.textContent = `download error: ${err}`;
+    const details = String(err);
+    console.error("audio download failed:", details);
+    nowPlayingEl.textContent = "download failed — open details";
+    nowPlayingEl.title = details;
+    if (isAndroid) window.alert(`Android download failed:\n\n${details}`);
   } finally {
     setLibraryActivity();
   }
@@ -347,12 +405,12 @@ playPauseBtn.addEventListener("click", async () => {
   if (!trackLoaded) {
     if (droneActive) {
       stopDrone();
-      setPlayPauseLabel("play");
+      setPlaybackButtonPlaying(false);
       nowPlayingEl.textContent = "no signal";
       setLiveIndicator(false);
     } else {
       startDrone();
-      setPlayPauseLabel("pause");
+      setPlaybackButtonPlaying(true);
       nowPlayingEl.textContent = "protocol drone";
       setLiveIndicator(true);
     }
@@ -361,10 +419,12 @@ playPauseBtn.addEventListener("click", async () => {
 
   const revision = ++playbackRevision;
   pendingToggles += 1;
+  setPlaybackButtonPlaying(!isPlaying);
   try {
     const status = await invoke("player_toggle");
     if (revision === playbackRevision) applyStatus(status);
   } catch (err) {
+    setPlaybackButtonPlaying(isPlaying);
     console.error("play/pause failed:", err);
     nowPlayingEl.textContent = `playback error: ${err}`;
   } finally {
@@ -446,9 +506,14 @@ function applyStatus(status) {
     trackListEl.querySelectorAll("li").forEach((li) => {
       li.classList.toggle("is-active", Number(li.dataset.index) === status.queue_index);
     });
+    if (lastVisibleQueueIndex !== status.queue_index) {
+      trackListEl.querySelector(`li[data-index="${status.queue_index}"]`)
+        ?.scrollIntoView({ block: "nearest" });
+      lastVisibleQueueIndex = status.queue_index;
+    }
   }
 
-  setPlayPauseLabel(isPlaying ? "pause" : "play");
+  setPlaybackButtonPlaying(isPlaying);
 
   const duration = status.duration_secs ?? 0;
   if (!isDraggingSeek) {
@@ -505,6 +570,22 @@ scheduleBars();
         }
       } catch (err) {
         console.error("failed to restore last session:", err);
+      }
+    }
+    if (isAndroid && saved.last_paths?.length) {
+      lastOpenedPaths = saved.last_paths;
+      try {
+        libraryTracks = await invoke("library_scan_paths", { paths: saved.last_paths });
+        renderTrackList();
+        if (libraryTracks.length) {
+          await playFromIndex(Math.min(saved.last_index ?? 0, libraryTracks.length - 1), false);
+          if (saved.last_position_secs) {
+            await invoke("player_seek", { seconds: saved.last_position_secs });
+          }
+        }
+      } catch (err) {
+        console.error("failed to restore Android library:", err);
+        lastOpenedPaths = [];
       }
     }
   } finally {

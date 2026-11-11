@@ -4,15 +4,17 @@ use std::thread;
 use std::time::Duration;
 
 use souvlaki::{
-    MediaControlEvent, MediaControls, MediaPlayback, MediaPosition, PlatformConfig,
-    SeekDirection,
+    MediaControlEvent, MediaControls, MediaPlayback, MediaPosition, PlatformConfig, SeekDirection,
 };
 
-use player_core::PlayerHandle;
+use denki_core::PlayerHandle;
 
 pub type SharedControls = Arc<Mutex<MediaControls>>;
 
-pub fn init(handle: PlayerHandle, hwnd: Option<*mut std::ffi::c_void>) -> Result<SharedControls, String> {
+pub fn init(
+    handle: PlayerHandle,
+    hwnd: Option<*mut std::ffi::c_void>,
+) -> Result<SharedControls, String> {
     let config = PlatformConfig {
         dbus_name: "denki",
         display_name: "Denki",

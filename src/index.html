@@ -12,7 +12,9 @@
       <span class="term__name">denki</span>
       <span id="status-live" class="term__dot" aria-hidden="true">●</span>
       <span id="status-clock" class="term__clock">00:00</span>
-      <button id="close-btn" class="term__close" aria-label="Close">×</button>
+      <button id="close-btn" class="term__close icon-button" aria-label="Close" title="Close">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+      </button>
     </header>
 
     <section class="now">
@@ -27,9 +29,16 @@
       <canvas id="oscilloscope" class="now__bars"></canvas>
 
       <div class="now__controls">
-        <button id="prev-btn" class="ctl"><span>prev</span></button>
-        <button id="play-pause-btn" class="ctl ctl--main"><span>play</span></button>
-        <button id="next-btn" class="ctl"><span>next</span></button>
+        <button id="prev-btn" class="ctl icon-button" aria-label="Previous track" title="Previous track">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5v14M19 6 9 12l10 6z" /></svg>
+        </button>
+        <button id="play-pause-btn" class="ctl ctl--main icon-button" aria-label="Play" aria-pressed="false" title="Play">
+          <svg class="icon-play" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 12 7-12 7z" /></svg>
+          <svg class="icon-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h4v14H7zM15 5h4v14h-4z" /></svg>
+        </button>
+        <button id="next-btn" class="ctl icon-button" aria-label="Next track" title="Next track">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5v14M5 6l10 6-10 6z" /></svg>
+        </button>
         <div class="vol">
           <span class="vol__label">vol</span>
           <input id="volume" type="range" min="0" max="1" step="0.01" value="1" />
@@ -42,9 +51,15 @@
         <div class="lib__label">library</div>
         <div class="lib__actions">
           <input id="download-url" class="lib__url" type="url" placeholder="paste media URL" aria-label="Media URL to download" />
-          <button id="download-btn" class="lib__action">download audio</button>
-          <button id="open-file-btn" class="lib__action">open file</button>
-          <button id="open-folder-btn" class="lib__action">open folder</button>
+          <button id="download-btn" class="lib__action icon-button" data-action="download" data-idle-label="Download audio" aria-label="Download audio" title="Download audio">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 17v3h16v-3" /></svg>
+          </button>
+          <button id="open-file-btn" class="lib__action icon-button" data-action="file" data-idle-label="Open audio file" aria-label="Open audio file" title="Open audio file">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h8l5 5v13H6zM14 3v6h5M9 14h7M9 17h7" /></svg>
+          </button>
+          <button id="open-folder-btn" class="lib__action icon-button" data-action="folder" data-idle-label="Open music folder" aria-label="Open music folder" title="Open music folder">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h7l2 2h9v11H3zM3 9h18" /></svg>
+          </button>
         </div>
       </div>
       <div id="library-activity" class="lib__activity" role="status" aria-live="polite" hidden>

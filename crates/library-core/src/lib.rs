@@ -1,3 +1,4 @@
+use std::fs::File;
 use std::path::Path;
 
 use lofty::file::{AudioFile, TaggedFileExt};
@@ -56,9 +57,44 @@ fn read_track(path: &Path) -> Option<Track> {
 
     Some(Track {
         path: path.to_string_lossy().to_string(),
-        title: tag.and_then(|t| t.title()).map(|s| s.to_string()).unwrap_or_else(fallback_title),
-        artist: tag.and_then(|t| t.artist()).map(|s| s.to_string()).unwrap_or_else(|| "Unknown Artist".into()),
-        album: tag.and_then(|t| t.album()).map(|s| s.to_string()).unwrap_or_else(|| "Unknown Album".into()),
+        title: tag
+            .and_then(|t| t.title())
+            .map(|s| s.to_string())
+            .unwrap_or_else(fallback_title),
+        artist: tag
+            .and_then(|t| t.artist())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "Unknown Artist".into()),
+        album: tag
+            .and_then(|t| t.album())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "Unknown Album".into()),
+        duration_secs,
+    })
+}
+
+/// Read metadata from a seekable file handle supplied by a platform adapter.
+/// Android's Storage Access Framework exposes content URIs, not normal paths.
+pub fn read_track_from_file(file: File, path: String, fallback_title: String) -> Option<Track> {
+    let mut file = file;
+    let tagged_file = lofty::read_from(&mut file).ok()?;
+    let duration_secs = tagged_file.properties().duration().as_secs_f64();
+    let tag = tagged_file.primary_tag();
+
+    Some(Track {
+        path,
+        title: tag
+            .and_then(|t| t.title())
+            .map(|s| s.to_string())
+            .unwrap_or(fallback_title),
+        artist: tag
+            .and_then(|t| t.artist())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "Unknown Artist".into()),
+        album: tag
+            .and_then(|t| t.album())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "Unknown Album".into()),
         duration_secs,
     })
 }

@@ -1,14 +1,15 @@
 use std::fs::File;
+use std::io::{self, Seek, SeekFrom};
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::time::Instant;
 
 use rodio::{Decoder, OutputStream, OutputStreamBuilder, Sink, Source};
 mod handle;
-pub use handle::{PlayerHandle, Status};
+pub use handle::{PlaybackStatus, PlayerHandle, Status};
 
 #[derive(thiserror::Error, Debug)]
 pub enum PlayerError {
@@ -24,6 +25,39 @@ pub enum PlayerError {
     NoTrack,
     #[error("audio command timed out")]
     CommandTimeout,
+}
+
+/// A queue item can be a desktop path or an already-opened platform file.
+/// Android's Storage Access Framework grants access through file descriptors
+/// rather than ordinary filesystem paths.
+#[derive(Clone)]
+pub enum AudioSource {
+    Path(PathBuf),
+    File(Arc<Mutex<File>>),
+}
+
+impl AudioSource {
+    pub fn from_path(path: PathBuf) -> Self {
+        Self::Path(path)
+    }
+
+    pub fn from_file(file: File) -> Self {
+        Self::File(Arc::new(Mutex::new(file)))
+    }
+
+    fn open(&self) -> io::Result<File> {
+        match self {
+            Self::Path(path) => File::open(path),
+            Self::File(file) => {
+                let file = file
+                    .lock()
+                    .map_err(|_| io::Error::other("audio file handle was poisoned"))?;
+                let mut clone = file.try_clone()?;
+                clone.seek(SeekFrom::Start(0))?;
+                Ok(clone)
+            }
+        }
+    }
 }
 
 const CAVA_BARS_PER_CHANNEL: usize = 24;
@@ -62,7 +96,8 @@ impl SpectrumBuffer {
     }
 
     fn set_channels(&self, channels: u16) {
-        self.channels.store(usize::from(channels.max(1)), Ordering::Relaxed);
+        self.channels
+            .store(usize::from(channels.max(1)), Ordering::Relaxed);
     }
 
     fn spectrum(&self, sample_rate: u32, volume: f32) -> Vec<f32> {
@@ -78,7 +113,11 @@ impl SpectrumBuffer {
         for frame in 0..available_frames {
             let absolute_frame = start_frame + frame;
             let left_index = (absolute_frame * channels) % CAVA_SAMPLE_CAPACITY;
-            let right_index = if channels > 1 { (left_index + 1) % CAVA_SAMPLE_CAPACITY } else { left_index };
+            let right_index = if channels > 1 {
+                (left_index + 1) % CAVA_SAMPLE_CAPACITY
+            } else {
+                left_index
+            };
             left[missing_frames + frame] =
                 f32::from_bits(self.samples[left_index].load(Ordering::Relaxed)) * volume;
             right[missing_frames + frame] =
@@ -108,13 +147,22 @@ fn cava_bands(samples: &[f32], sample_rate: u32) -> Vec<f32> {
     for bar in 0..CAVA_BARS_PER_CHANNEL {
         let lower = low_cutoff * ratio.powf(bar as f64 / CAVA_BARS_PER_CHANNEL as f64);
         let upper = low_cutoff * ratio.powf((bar + 1) as f64 / CAVA_BARS_PER_CHANNEL as f64);
-        let fft_size = if lower < 100.0 { CAVA_BASS_FFT_SIZE } else { CAVA_FFT_SIZE };
-        let spectrum = if fft_size == CAVA_BASS_FFT_SIZE { &bass_spectrum } else { &main_spectrum };
+        let fft_size = if lower < 100.0 {
+            CAVA_BASS_FFT_SIZE
+        } else {
+            CAVA_FFT_SIZE
+        };
+        let spectrum = if fft_size == CAVA_BASS_FFT_SIZE {
+            &bass_spectrum
+        } else {
+            &main_spectrum
+        };
         let lower_bin = (if fft_size == CAVA_BASS_FFT_SIZE {
             (lower * fft_size as f64 / sample_rate as f64).floor() as usize
         } else {
             (lower * fft_size as f64 / sample_rate as f64).ceil() as usize
-        }).min(spectrum.len().saturating_sub(1));
+        })
+        .min(spectrum.len().saturating_sub(1));
         let upper_bin = ((upper * fft_size as f64 / sample_rate as f64).ceil() as usize)
             .saturating_sub(1)
             .min(spectrum.len().saturating_sub(1))
@@ -124,7 +172,8 @@ fn cava_bands(samples: &[f32], sample_rate: u32) -> Vec<f32> {
 
         // CAVA's linear scaling: equalize for band width and frequency before
         // applying its 16-bit PCM scale and adaptive sensitivity in the UI.
-        let equalizer = upper.powf(0.85) / (2.0_f64.powi(28) * (fft_size as f64).log2() * bin_count);
+        let equalizer =
+            upper.powf(0.85) / (2.0_f64.powi(28) * (fft_size as f64).log2() * bin_count);
         output.push((magnitude_sum * equalizer) as f32);
     }
 
@@ -164,19 +213,29 @@ fn fft_magnitudes(samples: &[f32]) -> Vec<f64> {
             for offset in 0..len / 2 {
                 let even = start + offset;
                 let odd = even + len / 2;
-                let (vr, vi) = (real[odd] * wr - imag[odd] * wi, real[odd] * wi + imag[odd] * wr);
+                let (vr, vi) = (
+                    real[odd] * wr - imag[odd] * wi,
+                    real[odd] * wi + imag[odd] * wr,
+                );
                 let (ur, ui) = (real[even], imag[even]);
                 real[even] = ur + vr;
                 imag[even] = ui + vi;
                 real[odd] = ur - vr;
                 imag[odd] = ui - vi;
-                (wr, wi) = (wr * step_real - wi * step_imag, wr * step_imag + wi * step_real);
+                (wr, wi) = (
+                    wr * step_real - wi * step_imag,
+                    wr * step_imag + wi * step_real,
+                );
             }
         }
         len <<= 1;
     }
 
-    real.iter().zip(&imag).take(n / 2 + 1).map(|(re, im)| re.hypot(*im)).collect()
+    real.iter()
+        .zip(&imag)
+        .take(n / 2 + 1)
+        .map(|(re, im)| re.hypot(*im))
+        .collect()
 }
 
 /// Passes decoded samples to Rodio unchanged while retaining a short stereo
@@ -192,7 +251,12 @@ impl<S: Source<Item = f32>> SpectrumSource<S> {
     fn new(inner: S, spectrum_buffer: Arc<SpectrumBuffer>) -> Self {
         let input_channels = usize::from(inner.channels().max(1));
         spectrum_buffer.set_channels(input_channels.min(2) as u16);
-        Self { inner, spectrum_buffer, input_channels, sample_index: 0 }
+        Self {
+            inner,
+            spectrum_buffer,
+            input_channels,
+            sample_index: 0,
+        }
     }
 }
 
@@ -241,9 +305,9 @@ pub struct Player {
     _stream: OutputStream, // must stay alive for the whole player's lifetime
     sink: Option<Sink>,
     total_duration: Option<Duration>,
-    position_base: Duration,        // committed position as of the last play/pause/seek
+    position_base: Duration, // committed position as of the last play/pause/seek
     playing_since: Option<Instant>,
-    current_path: Option<PathBuf>,
+    current_source: Option<AudioSource>,
     volume: f32,
     spectrum_buffer: Arc<SpectrumBuffer>,
     sample_rate: u32,
@@ -258,7 +322,7 @@ impl Player {
             total_duration: None,
             position_base: Duration::ZERO,
             playing_since: None,
-            current_path: None,
+            current_source: None,
             volume: 1.0,
             spectrum_buffer: Arc::new(SpectrumBuffer::new()),
             sample_rate: 44_100,
@@ -266,12 +330,16 @@ impl Player {
     }
 
     pub fn load(&mut self, path: &Path) -> Result<(), PlayerError> {
-        let file = File::open(path)?;
-        let source = Decoder::try_from(file)?;
-        self.total_duration = source.total_duration();
-        self.sample_rate = source.sample_rate();
+        self.load_source(&AudioSource::from_path(path.to_owned()))
+    }
+
+    pub fn load_source(&mut self, audio_source: &AudioSource) -> Result<(), PlayerError> {
+        let file = audio_source.open()?;
+        let decoded = Decoder::try_from(file)?;
+        self.total_duration = decoded.total_duration();
+        self.sample_rate = decoded.sample_rate();
         self.spectrum_buffer.clear();
-        let source = SpectrumSource::new(source, self.spectrum_buffer.clone());
+        let source = SpectrumSource::new(decoded, self.spectrum_buffer.clone());
 
         let sink = Sink::connect_new(self._stream.mixer());
         sink.append(source);
@@ -280,7 +348,7 @@ impl Player {
         self.sink = Some(sink);
         self.position_base = Duration::ZERO;
         self.playing_since = None;
-        self.current_path = Some(path.to_owned()); 
+        self.current_source = Some(audio_source.clone());
         Ok(())
     }
 
@@ -314,8 +382,8 @@ impl Player {
             // A completed sink has no source left to resume. Reloading makes
             // Play work again after the last track in a queue has finished.
             if self.finished() {
-                let path = self.current_path.clone().ok_or(PlayerError::NoTrack)?;
-                self.load(&path)?;
+                let source = self.current_source.clone().ok_or(PlayerError::NoTrack)?;
+                self.load_source(&source)?;
             }
             self.play();
         }
@@ -347,12 +415,13 @@ impl Player {
 
     pub fn seek(&mut self, position: Duration) -> Result<(), PlayerError> {
         if self.finished() {
-            let path = self.current_path.clone().ok_or(PlayerError::NoTrack)?;
-            self.load(&path)?; // fresh sink with the source re-queued
+            let source = self.current_source.clone().ok_or(PlayerError::NoTrack)?;
+            self.load_source(&source)?; // fresh sink with the source re-queued
         }
 
         let sink = self.sink.as_ref().ok_or(PlayerError::NoTrack)?;
-        sink.try_seek(position).map_err(|e| PlayerError::Seek(e.to_string()))?;
+        sink.try_seek(position)
+            .map_err(|e| PlayerError::Seek(e.to_string()))?;
         self.position_base = position;
 
         let was_playing = self.playing_since.take().is_some();

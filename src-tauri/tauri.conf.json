@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Denki",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "identifier": "com.zaha.denki",
   "build": {
     "frontendDist": "../src"
@@ -12,7 +12,7 @@
       {
         "title": "Denki",
         "width": 480,
-        "height": 370,
+        "height": 440,
         "resizable": false,
         "decorations": false,
         "transparent": true,
@@ -37,8 +37,11 @@
     "active": true,
     "targets": "all",
     "category": "Music",
-    "shortDescription": "A compact desktop music player",
-    "longDescription": "Denki is a compact desktop music player with local library scanning, playback controls, a stereo spectrum visualizer, session restoration, and platform media controls.",
+    "android": {
+      "minSdkVersion": 26
+    },
+    "shortDescription": "A compact music player for desktop and Android",
+    "longDescription": "Denki is a compact music player for desktop and Android, with local library scanning, playback controls, audio downloads, a stereo spectrum visualizer, and session restoration.",
     "license": "GPL-3.0-only",
     "licenseFile": "../COPYING",
     "icon": [

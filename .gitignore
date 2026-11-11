@@ -11,6 +11,8 @@ node_modules
 dist
 dist-ssr
 *.local
+*.jks
+*.keystore
 /target/
 /src-tauri/target/
 

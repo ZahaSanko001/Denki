@@ -3,10 +3,10 @@ use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::Duration;
 
-use crate::{Player, PlayerError};
+use crate::{AudioSource, Player, PlayerError};
 
 enum Command {
-    Load(PathBuf, Sender<Result<(), PlayerError>>),
+    Load(AudioSource, Sender<Result<(), PlayerError>>),
     Play,
     Pause,
     Toggle(Sender<Result<Status, PlayerError>>),
@@ -14,7 +14,12 @@ enum Command {
     SetVolume(f32),
     GetStatus(Sender<Status>),
     GetPlaybackStatus(Sender<PlaybackStatus>),
-    LoadQueue(Vec<PathBuf>, usize, bool, Sender<Result<(), PlayerError>>),
+    LoadQueue(
+        Vec<AudioSource>,
+        usize,
+        bool,
+        Sender<Result<(), PlayerError>>,
+    ),
     Next(Sender<Result<(), PlayerError>>),
     Prev(Sender<Result<(), PlayerError>>),
 }
@@ -54,7 +59,7 @@ impl PlayerHandle {
                     return;
                 }
             };
-            let mut queue: Vec<PathBuf> = Vec::new();
+            let mut queue: Vec<AudioSource> = Vec::new();
             let mut queue_index: usize = 0;
 
             loop {
@@ -63,7 +68,7 @@ impl PlayerHandle {
                     Err(RecvTimeoutError::Timeout) => {
                         if !queue.is_empty() && player.finished() {
                             queue_index = (queue_index + 1) % queue.len();
-                            if player.load(&queue[queue_index]).is_ok() {
+                            if player.load_source(&queue[queue_index]).is_ok() {
                                 player.play();
                             }
                         }
@@ -77,13 +82,21 @@ impl PlayerHandle {
     }
 
     pub fn load(&self, path: PathBuf) -> Result<(), PlayerError> {
+        self.load_source(AudioSource::from_path(path))
+    }
+
+    pub fn load_source(&self, source: AudioSource) -> Result<(), PlayerError> {
         let (tx, rx) = mpsc::channel();
-        self.tx.send(Command::Load(path, tx)).ok();
+        self.tx.send(Command::Load(source, tx)).ok();
         rx.recv().unwrap_or(Err(PlayerError::NoTrack))
     }
 
-    pub fn play(&self) { self.tx.send(Command::Play).ok(); }
-    pub fn pause(&self) { self.tx.send(Command::Pause).ok(); }
+    pub fn play(&self) {
+        self.tx.send(Command::Play).ok();
+    }
+    pub fn pause(&self) {
+        self.tx.send(Command::Pause).ok();
+    }
 
     pub fn toggle(&self) -> Result<Status, PlayerError> {
         let (tx, rx) = mpsc::channel();
@@ -104,14 +117,20 @@ impl PlayerHandle {
         rx.recv().unwrap_or(Err(PlayerError::NoTrack))
     }
 
-    pub fn set_volume(&self, vol: f32) { self.tx.send(Command::SetVolume(vol)).ok(); }
+    pub fn set_volume(&self, vol: f32) {
+        self.tx.send(Command::SetVolume(vol)).ok();
+    }
 
     pub fn status(&self) -> Status {
         let (tx, rx) = mpsc::channel();
         self.tx.send(Command::GetStatus(tx)).ok();
         rx.recv().unwrap_or(Status {
-            is_playing: false, volume: 0.0, position_secs: 0.0,
-            duration_secs: None, queue_index: None, queue_len: 0,
+            is_playing: false,
+            volume: 0.0,
+            position_secs: 0.0,
+            duration_secs: None,
+            queue_index: None,
+            queue_len: 0,
             spectrum: vec![0.0; 48],
         })
     }
@@ -127,9 +146,26 @@ impl PlayerHandle {
         })
     }
 
-    pub fn load_queue(&self, paths: Vec<PathBuf>, start_index: usize, autoplay: bool) -> Result<(), PlayerError> {
+    pub fn load_queue(
+        &self,
+        paths: Vec<PathBuf>,
+        start_index: usize,
+        autoplay: bool,
+    ) -> Result<(), PlayerError> {
+        let sources = paths.into_iter().map(AudioSource::from_path).collect();
+        self.load_source_queue(sources, start_index, autoplay)
+    }
+
+    pub fn load_source_queue(
+        &self,
+        sources: Vec<AudioSource>,
+        start_index: usize,
+        autoplay: bool,
+    ) -> Result<(), PlayerError> {
         let (tx, rx) = mpsc::channel();
-        self.tx.send(Command::LoadQueue(paths, start_index, autoplay, tx)).ok();
+        self.tx
+            .send(Command::LoadQueue(sources, start_index, autoplay, tx))
+            .ok();
         rx.recv().unwrap_or(Err(PlayerError::NoTrack))
     }
 
@@ -146,33 +182,52 @@ impl PlayerHandle {
     }
 }
 
-fn handle_command(cmd: Command, player: &mut Player, queue: &mut Vec<PathBuf>, queue_index: &mut usize) {
+fn handle_command(
+    cmd: Command,
+    player: &mut Player,
+    queue: &mut Vec<AudioSource>,
+    queue_index: &mut usize,
+) {
     match cmd {
-        Command::Load(path, reply) => { let _ = reply.send(player.load(&path)); }
+        Command::Load(source, reply) => {
+            let _ = reply.send(player.load_source(&source));
+        }
         Command::Play => player.play(),
         Command::Pause => player.pause(),
         Command::Toggle(reply) => {
             let result = player.toggle().map(|_| status(player, queue, *queue_index));
             let _ = reply.send(result);
         }
-        Command::Seek(pos, reply) => { let _ = reply.send(player.seek(pos)); }
+        Command::Seek(pos, reply) => {
+            let _ = reply.send(player.seek(pos));
+        }
         Command::SetVolume(vol) => player.set_volume(vol),
-        Command::GetStatus(reply) => { let _ = reply.send(status(player, queue, *queue_index)); }
+        Command::GetStatus(reply) => {
+            let _ = reply.send(status(player, queue, *queue_index));
+        }
         Command::GetPlaybackStatus(reply) => {
             let _ = reply.send(playback_status(player, queue));
         }
         Command::LoadQueue(paths, start, autoplay, reply) => {
             *queue = paths;
             *queue_index = start.min(queue.len().saturating_sub(1));
-            let result = queue.get(*queue_index).map_or(Err(PlayerError::NoTrack), |p| player.load(p));
-            if result.is_ok() && autoplay { player.play(); }
+            let result = queue
+                .get(*queue_index)
+                .map_or(Err(PlayerError::NoTrack), |source| {
+                    player.load_source(source)
+                });
+            if result.is_ok() && autoplay {
+                player.play();
+            }
             let _ = reply.send(result);
         }
         Command::Next(reply) => {
             if !queue.is_empty() {
                 *queue_index = (*queue_index + 1) % queue.len();
-                let result = player.load(&queue[*queue_index]);
-                if result.is_ok() { player.play(); }
+                let result = player.load_source(&queue[*queue_index]);
+                if result.is_ok() {
+                    player.play();
+                }
                 let _ = reply.send(result);
             } else {
                 let _ = reply.send(Err(PlayerError::NoTrack));
@@ -181,8 +236,10 @@ fn handle_command(cmd: Command, player: &mut Player, queue: &mut Vec<PathBuf>, q
         Command::Prev(reply) => {
             if !queue.is_empty() {
                 *queue_index = (*queue_index + queue.len() - 1) % queue.len();
-                let result = player.load(&queue[*queue_index]);
-                if result.is_ok() { player.play(); }
+                let result = player.load_source(&queue[*queue_index]);
+                if result.is_ok() {
+                    player.play();
+                }
                 let _ = reply.send(result);
             } else {
                 let _ = reply.send(Err(PlayerError::NoTrack));
@@ -191,19 +248,23 @@ fn handle_command(cmd: Command, player: &mut Player, queue: &mut Vec<PathBuf>, q
     }
 }
 
-fn status(player: &Player, queue: &[PathBuf], queue_index: usize) -> Status {
+fn status(player: &Player, queue: &[AudioSource], queue_index: usize) -> Status {
     Status {
         is_playing: player.is_playing(),
         volume: player.volume(),
         position_secs: player.position().as_secs_f64(),
         duration_secs: player.total_duration().map(|d| d.as_secs_f64()),
         spectrum: player.spectrum(),
-        queue_index: if queue.is_empty() { None } else { Some(queue_index) },
+        queue_index: if queue.is_empty() {
+            None
+        } else {
+            Some(queue_index)
+        },
         queue_len: queue.len(),
     }
 }
 
-fn playback_status(player: &Player, queue: &[PathBuf]) -> PlaybackStatus {
+fn playback_status(player: &Player, queue: &[AudioSource]) -> PlaybackStatus {
     PlaybackStatus {
         is_playing: player.is_playing(),
         position_secs: player.position().as_secs_f64(),

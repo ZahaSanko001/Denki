@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "src-tauri",
+    "crates/denki-core",
     "crates/player-core", 
     "crates/library-core",
 ]
