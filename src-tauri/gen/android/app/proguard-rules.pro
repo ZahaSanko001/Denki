@@ -22,3 +22,6 @@
 
 # Tauri loads this plugin by its Android class name at runtime.
 -keep class com.zaha.denki.YtDlpPlugin { *; }
+
+# yt-dlp Android uses native and reflective entry points and ships no consumer rules.
+-keep class com.yausername.youtubedl_android.** { *; }

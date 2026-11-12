@@ -69,6 +69,10 @@ class YtDlpPlugin(private val activity: Activity) : Plugin(activity) {
 
                 val uri = publishAudio(downloaded)
                 invoke.resolveObject(uri.toString())
+            } catch (error: LinkageError) {
+                android.util.Log.e("Denki", "Could not load the Android yt-dlp runtime", error)
+                val details = error.message?.takeIf { it.isNotBlank() } ?: error.javaClass.simpleName
+                invoke.reject("Could not load the Android yt-dlp runtime: $details")
             } catch (error: Exception) {
                 android.util.Log.e("Denki", "Audio download failed", error)
                 val details = error.message?.takeIf { it.isNotBlank() } ?: "Audio download failed"

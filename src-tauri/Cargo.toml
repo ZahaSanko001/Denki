@@ -1,6 +1,6 @@
 [package]
 name = "denki"
-version = "0.1.2"
+version = "0.1.3"
 description = "A compact desktop music player built with Tauri and Rust"
 edition = "2021"
 license.workspace = true
