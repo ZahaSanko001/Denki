@@ -25,3 +25,6 @@
 
 # yt-dlp Android uses native and reflective entry points and ships no consumer rules.
 -keep class com.yausername.youtubedl_android.** { *; }
+
+# Preserve ZIP metadata helpers used by the yt-dlp Android runtime's update handling.
+-keep class org.apache.commons.compress.archivers.zip.** { *; }
